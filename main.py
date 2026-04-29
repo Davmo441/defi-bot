@@ -28,8 +28,9 @@ def filter_pools(pools):
         if apy < 20 or apy > 200:
             continue
 
-        if tvl < 2_000_000:
+        if tvl < 10_000_000:
             continue
+    
 
         if il == "yes" and apy < 50:
             continue
