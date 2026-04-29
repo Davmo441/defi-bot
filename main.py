@@ -36,7 +36,7 @@ def recommended_range(p):
         base = "±20% à ±40%"
 
     if apy > 80:
-        base += " (élargir: volatilité élevée)"
+        base += " (volatilité élevée)"
 
     if il == "yes":
         base += " ⚠️ IL élevé → range large conseillé"
@@ -90,7 +90,7 @@ def sniper(p):
 
     if tvl_1d and apy_1d:
         if tvl_1d > 20 and apy_1d >= 0:
-            return "💎 PREMIUM SNIPER: TVL 24h > +20% ET APY stable ou en hausse"
+            return "💎 PREMIUM SNIPER: TVL +20% & APY stable"
 
     return ""
 
@@ -100,13 +100,14 @@ def entry(p):
     apy_1d = p.get("apyPct1D")
 
     if tvl_1d and tvl_1d > 20:
-        return "🎯 Entrée: momentum (liquidity arrive)"
+        return "🎯 Entrée: momentum"
 
     if apy_1d and apy_1d < -10:
         return "🎯 Attendre (APY baisse)"
 
     return "🎯 Neutre"
 
+# 🔍 FILTER
 def filter_pools(pools):
     results = []
 
@@ -131,6 +132,7 @@ def filter_pools(pools):
 
     return sorted(results, key=lambda x: x["apy"], reverse=True)[:8]
 
+# 📝 FORMAT MESSAGE
 def format_msg(pools):
     if not pools:
         return "🛡️ SAFE MODE: aucune pool intéressante"
@@ -149,6 +151,14 @@ def format_msg(pools):
         if p.get("tvlUsdPct1D") is not None:
             msg += f"TVL 24h: {round(p['tvlUsdPct1D'],2)}%\n"
 
+        # 🔗 LIENS PRO
+        msg += f"🔗 DefiLlama: https://defillama.com/yields/pool/{p.get('pool')}\n"
+
+        # BONUS PRO Dexscreener
+        if p.get("symbol"):
+            token = p['symbol'].split("-")[0]
+            msg += f"📊 Chart: https://dexscreener.com/search?q={token}\n"
+
         msg += recommended_range(p) + "\n"
         msg += fake_yield(p) + "\n"
 
@@ -161,14 +171,16 @@ def format_msg(pools):
 
     return msg
 
+# 📤 SEND
 def send(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": CHAT_ID, "text": msg})
 
+# 🚀 RUN (CRON)
 def run():
     pools = requests.get("https://yields.llama.fi/pools").json()["data"]
     best = filter_pools(pools)
     send(format_msg(best))
 
-# 🚀 EXECUTION (CRON)
+# EXECUTION UNIQUE
 run()
