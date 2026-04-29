@@ -26,13 +26,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"OK")
-
-def start_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), Handler)
-    print(f"Server running on port {port}")
-    server.serve_forever()
+        self.wfile.write(b"Bot alive")
 
 def recommended_range(p):
     symbol = (p.get("symbol") or "").upper()
@@ -207,17 +201,25 @@ def run():
     best = filter_pools(pools)
     send(format_msg(best))
 
-threading.Thread(target=start_server, daemon=True).start()
-
-while True:
-    try:
-        run()
-        print("Run OK ✅")
-    except Exception as e:
-        print("Erreur:", e)
+def main_loop():
+    while True:
         try:
-            send(f"Erreur: {e}")
-        except Exception:
-            pass
+            run()
+            print("Run OK ✅")
+        except Exception as e:
+            print("Erreur:", e)
+            try:
+                send(f"Erreur: {e}")
+            except Exception:
+                pass
 
-    time.sleep(3600)
+        time.sleep(3600)
+
+if __name__ == "__main__":
+    threading.Thread(target=main_loop, daemon=True).start()
+
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), Handler)
+
+    print(f"Server running on port {port}")
+    server.serve_forever()
