@@ -27,7 +27,6 @@ def recommended_range(p):
     il = p.get("ilRisk")
     apy = p.get("apy", 0)
 
-    # BASE
     if stable:
         base = "±0.5% à ±2%"
     elif "BTC" in symbol:
@@ -37,7 +36,6 @@ def recommended_range(p):
     else:
         base = "±20% à ±40%"
 
-    # PRO / ELITE adjustments
     if apy > 80:
         base += " (élargir: volatilité élevée)"
 
@@ -146,17 +144,20 @@ def format_msg(pools):
         msg += f"APY: {round(p.get('apy',0),2)}%\n"
         msg += f"TVL: ${round(p.get('tvlUsd',0)/1e6,2)}M\n"
 
-        if p.get("apyPct1D"):
+        if p.get("apyPct1D") is not None:
             msg += f"APY 24h: {round(p['apyPct1D'],2)}%\n"
 
-        if p.get("tvlUsdPct1D"):
+        if p.get("tvlUsdPct1D") is not None:
             msg += f"TVL 24h: {round(p['tvlUsdPct1D'],2)}%\n"
 
         msg += recommended_range(p) + "\n"
         msg += fake_yield(p) + "\n"
-        msg += sniper(p) + "\n"
-        msg += entry(p) + "\n"
 
+        snipe = sniper(p)
+        if snipe:
+            msg += snipe + "\n"
+
+        msg += entry(p) + "\n"
         msg += "────────────\n\n"
 
     return msg
@@ -170,10 +171,16 @@ def run():
     best = filter_pools(pools)
     send(format_msg(best))
 
+# 🔁 BOUCLE
 while True:
     try:
         run()
+        print("Run OK ✅")
     except Exception as e:
-        send(f"Erreur: {e}")
+        print("Erreur:", e)
+        try:
+            send(f"Erreur: {e}")
+        except:
+            pass
 
-    time.sleep(3600)
+    time.sleep(3600)  # 1h
