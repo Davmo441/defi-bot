@@ -21,9 +21,20 @@ def filter_pools(pools):
     for p in pools:
         apy = p.get("apy", 0)
         tvl = p.get("tvlUsd", 0)
+        stable = p.get("stablecoin")
+        il = p.get("ilRisk")
 
-        if apy > 20 and tvl > 1_000_000:
-            results.append(p)
+        # 🔥 FILTRES PRO
+        if apy < 20 or apy > 200:
+            continue
+
+        if tvl < 2_000_000:
+            continue
+
+        if il == "yes" and apy < 50:
+            continue
+
+        results.append(p)
 
     return sorted(results, key=lambda x: x["apy"], reverse=True)[:5]
 
