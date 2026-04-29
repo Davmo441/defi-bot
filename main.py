@@ -7,174 +7,166 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 MIN_TVL = 8_000_000
 MIN_APY = 20
-MAX_APY = 200
+MAX_APY = 120
 
 SOLID_PROTOCOLS = {
-    "uniswap-v3",
-    "uniswap-v2",
-    "curve-dex",
-    "aave-v3",
-    "aave-v2",
-    "gmx",
-    "compound-v3",
-    "compound-v2",
-    "balancer-v2",
-    "morpho-blue",
-    "beefy",
-    "convex-finance",
-    "pendle",
-    "aerodrome-slipstream",
-    "aerodrome-v1",
-    "camelot-v3",
-    "frax-finance",
-    "yearn-finance",
-    "stargate",
-    "silo",
-    "radiant-v2",
+    "uniswap-v3","curve-dex","aave-v3","gmx","compound-v3",
+    "balancer-v2","morpho-blue","beefy","convex-finance",
+    "pendle","aerodrome-slipstream","camelot-v3",
+    "yearn-finance","frax-finance"
 }
 
 CHAINS = {
-    "Ethereum",
-    "Arbitrum",
-    "Base",
-    "Optimism",
-    "Polygon",
-    "Avalanche",
-    "BNB",
+    "Ethereum","Arbitrum","Base","Optimism","Polygon","Avalanche","BNB"
 }
 
-def send(msg):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={
-        "chat_id": CHAT_ID,
-        "text": msg,
-        "disable_web_page_preview": True
-    })
-
-def get_pools():
-    url = "https://yields.llama.fi/pools"
-    return requests.get(url, timeout=30).json()["data"]
-
-def get_risk_score(p):
-    apy = p.get("apy") or 0
-    tvl = p.get("tvlUsd") or 0
-    il = p.get("ilRisk")
-    project = p.get("project")
+# 🟢 RANGE EN %
+def recommended_range(p):
+    symbol = (p.get("symbol") or "").upper()
     stable = p.get("stablecoin")
-    apy_1d = p.get("apyPct1D")
-    tvl_1d = p.get("tvlUsdPct1D")
+    il = p.get("ilRisk")
+    apy = p.get("apy", 0)
 
-    risk = 0
+    # BASE
+    if stable:
+        base = "±0.5% à ±2%"
+    elif "BTC" in symbol:
+        base = "±8% à ±15%"
+    elif "ETH" in symbol:
+        base = "±15% à ±30%"
+    else:
+        base = "±20% à ±40%"
 
-    if tvl < 5_000_000:
-        risk += 3
-    elif tvl < 10_000_000:
-        risk += 2
-    elif tvl < 50_000_000:
-        risk += 1
-
-    if apy > 100:
-        risk += 3
-    elif apy > 60:
-        risk += 2
-    elif apy > 35:
-        risk += 1
+    # PRO / ELITE adjustments
+    if apy > 80:
+        base += " (élargir: volatilité élevée)"
 
     if il == "yes":
-        risk += 3
+        base += " ⚠️ IL élevé → range large conseillé"
 
-    if project not in SOLID_PROTOCOLS:
-        risk += 2
+    return f"Range: {base}"
 
-    if stable:
-        risk -= 1
+# 🧠 SCORE
+def get_score(p):
+    apy = p.get("apy", 0)
+    tvl = p.get("tvlUsd", 0)
+    il = p.get("ilRisk")
+    project = p.get("project")
 
-    if apy_1d is not None and abs(apy_1d) > 50:
-        risk += 2
+    score = 0
 
-    if tvl_1d is not None and tvl_1d < -20:
-        risk += 3
+    if tvl > 50_000_000: score += 3
+    elif tvl > 20_000_000: score += 2
+    elif tvl > 10_000_000: score += 1
 
-    if risk <= 2:
-        return "🟢 SAFE"
-    elif risk <= 5:
-        return "🟠 MOYEN"
-    else:
-        return "🔴 RISQUÉ"
+    if 25 <= apy <= 60: score += 3
+    elif 60 < apy <= 100: score += 2
+
+    if il == "yes": score -= 3
+    if project in SOLID_PROTOCOLS: score += 2
+
+    return score
+
+def risk_label(p):
+    s = get_score(p)
+    if s >= 5: return "🟢 SAFE"
+    elif s >= 3: return "🟠 MOYEN"
+    return "🔴 RISQUÉ"
+
+# 🧠 FAKE YIELD
+def fake_yield(p):
+    apy = p.get("apy", 0)
+    apy_1d = p.get("apyPct1D")
+
+    if apy > 100:
+        return "⚠️ APY très élevé (possible inflation)"
+
+    if apy_1d and abs(apy_1d) > 80:
+        return "⚠️ APY instable"
+
+    return "🧠 Yield OK"
+
+# 💎 PREMIUM SNIPER
+def sniper(p):
+    tvl_1d = p.get("tvlUsdPct1D")
+    apy_1d = p.get("apyPct1D")
+
+    if tvl_1d and apy_1d:
+        if tvl_1d > 20 and apy_1d >= 0:
+            return "💎 PREMIUM SNIPER: TVL 24h > +20% ET APY stable ou en hausse"
+
+    return ""
+
+# 🎯 ENTRY
+def entry(p):
+    tvl_1d = p.get("tvlUsdPct1D")
+    apy_1d = p.get("apyPct1D")
+
+    if tvl_1d and tvl_1d > 20:
+        return "🎯 Entrée: momentum (liquidity arrive)"
+
+    if apy_1d and apy_1d < -10:
+        return "🎯 Attendre (APY baisse)"
+
+    return "🎯 Neutre"
 
 def filter_pools(pools):
     results = []
 
     for p in pools:
-        apy = p.get("apy") or 0
-        tvl = p.get("tvlUsd") or 0
-        project = p.get("project")
-        chain = p.get("chain")
-
-        if chain not in CHAINS:
+        if p.get("chain") not in CHAINS:
             continue
 
-        if project not in SOLID_PROTOCOLS:
+        if p.get("project") not in SOLID_PROTOCOLS:
             continue
 
-        if tvl < MIN_TVL:
+        if p.get("tvlUsd", 0) < MIN_TVL:
             continue
 
+        apy = p.get("apy", 0)
         if apy < MIN_APY or apy > MAX_APY:
             continue
 
-        score = get_risk_score(p)
-
-        if score == "🔴 RISQUÉ":
+        if risk_label(p) == "🔴 RISQUÉ":
             continue
 
         results.append(p)
 
-    return sorted(results, key=lambda x: x.get("apy") or 0, reverse=True)[:8]
+    return sorted(results, key=lambda x: x["apy"], reverse=True)[:8]
 
 def format_msg(pools):
     if not pools:
-        return "Aucune pool intéressante selon les filtres actuels."
+        return "🛡️ SAFE MODE: aucune pool intéressante"
 
-    msg = "🚀 TOP DeFi APY — Smart Filter\n\n"
+    msg = "🛡️ SAFE MODE + PRO + ELITE\n\n"
 
     for p in pools:
-        score = get_risk_score(p)
+        msg += f"{risk_label(p)}\n"
+        msg += f"{p['symbol']} | {p['project']}\n"
+        msg += f"APY: {round(p.get('apy',0),2)}%\n"
+        msg += f"TVL: ${round(p.get('tvlUsd',0)/1e6,2)}M\n"
 
-        symbol = p.get("symbol")
-        project = p.get("project")
-        chain = p.get("chain")
-        apy = round(p.get("apy") or 0, 2)
-        tvl = round((p.get("tvlUsd") or 0) / 1_000_000, 2)
-        il = p.get("ilRisk")
-        stable = p.get("stablecoin")
-        apy_1d = p.get("apyPct1D")
-        tvl_1d = p.get("tvlUsdPct1D")
-        pool_id = p.get("pool")
+        if p.get("apyPct1D"):
+            msg += f"APY 24h: {round(p['apyPct1D'],2)}%\n"
 
-        msg += f"{score}\n"
-        msg += f"{symbol} | {project}\n"
-        msg += f"Chain: {chain}\n"
-        msg += f"APY: {apy}%\n"
-        msg += f"TVL: ${tvl}M\n"
-        msg += f"Stablecoin: {stable}\n"
-        msg += f"IL risk: {il}\n"
+        if p.get("tvlUsdPct1D"):
+            msg += f"TVL 24h: {round(p['tvlUsdPct1D'],2)}%\n"
 
-        if apy_1d is not None:
-            msg += f"APY 24h: {round(apy_1d, 2)}%\n"
+        msg += recommended_range(p) + "\n"
+        msg += fake_yield(p) + "\n"
+        msg += sniper(p) + "\n"
+        msg += entry(p) + "\n"
 
-        if tvl_1d is not None:
-            msg += f"TVL 24h: {round(tvl_1d, 2)}%\n"
-            if tvl_1d < -20:
-                msg += "⚠️ ALERTE: chute TVL importante\n"
+        msg += "────────────\n\n"
 
-        msg += f"Lien: https://defillama.com/yields/pool/{pool_id}\n\n"
-
-    msg += "⚠️ Pas un conseil financier. Vérifie toujours."
     return msg
 
+def send(msg):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.post(url, json={"chat_id": CHAT_ID, "text": msg})
+
 def run():
-    pools = get_pools()
+    pools = requests.get("https://yields.llama.fi/pools").json()["data"]
     best = filter_pools(pools)
     send(format_msg(best))
 
@@ -182,6 +174,6 @@ while True:
     try:
         run()
     except Exception as e:
-        send(f"Erreur bot: {e}")
+        send(f"Erreur: {e}")
 
     time.sleep(3600)
