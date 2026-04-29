@@ -12,14 +12,14 @@ MIN_APY = 20
 MAX_APY = 120
 
 SOLID_PROTOCOLS = {
-    "uniswap-v3","curve-dex","aave-v3","gmx","compound-v3",
-    "balancer-v2","morpho-blue","beefy","convex-finance",
-    "pendle","aerodrome-slipstream","camelot-v3",
-    "yearn-finance","frax-finance"
+    "uniswap-v3", "curve-dex", "aave-v3", "gmx", "compound-v3",
+    "balancer-v2", "morpho-blue", "beefy", "convex-finance",
+    "pendle", "aerodrome-slipstream", "camelot-v3",
+    "yearn-finance", "frax-finance"
 }
 
 CHAINS = {
-    "Ethereum","Arbitrum","Base","Optimism","Polygon","Avalanche","BNB"
+    "Ethereum", "Arbitrum", "Base", "Optimism", "Polygon", "Avalanche", "BNB"
 }
 
 class Handler(BaseHTTPRequestHandler):
@@ -31,6 +31,7 @@ class Handler(BaseHTTPRequestHandler):
 def start_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), Handler)
+    print(f"Server running on port {port}")
     server.serve_forever()
 
 def recommended_range(p):
@@ -64,22 +65,32 @@ def get_score(p):
 
     score = 0
 
-    if tvl > 50_000_000: score += 3
-    elif tvl > 20_000_000: score += 2
-    elif tvl > 10_000_000: score += 1
+    if tvl > 50_000_000:
+        score += 3
+    elif tvl > 20_000_000:
+        score += 2
+    elif tvl > 10_000_000:
+        score += 1
 
-    if 25 <= apy <= 60: score += 3
-    elif 60 < apy <= 100: score += 2
+    if 25 <= apy <= 60:
+        score += 3
+    elif 60 < apy <= 100:
+        score += 2
 
-    if il == "yes": score -= 3
-    if project in SOLID_PROTOCOLS: score += 2
+    if il == "yes":
+        score -= 3
+
+    if project in SOLID_PROTOCOLS:
+        score += 2
 
     return score
 
 def risk_label(p):
     s = get_score(p)
-    if s >= 5: return "🟢 SAFE"
-    elif s >= 3: return "🟠 MOYEN"
+    if s >= 5:
+        return "🟢 SAFE"
+    elif s >= 3:
+        return "🟠 MOYEN"
     return "🔴 RISQUÉ"
 
 def fake_yield(p):
@@ -138,7 +149,7 @@ def filter_pools(pools):
 
         results.append(p)
 
-    return sorted(results, key=lambda x: x["apy"], reverse=True)[:8]
+    return sorted(results, key=lambda x: x.get("apy", 0), reverse=True)[:8]
 
 def format_msg(pools):
     if not pools:
@@ -148,15 +159,16 @@ def format_msg(pools):
 
     for p in pools:
         msg += f"{risk_label(p)}\n"
-        msg += f"{p['symbol']} | {p['project']}\n"
-        msg += f"APY: {round(p.get('apy',0),2)}%\n"
-        msg += f"TVL: ${round(p.get('tvlUsd',0)/1e6,2)}M\n"
+        msg += f"{p.get('symbol')} | {p.get('project')}\n"
+        msg += f"Chain: {p.get('chain')}\n"
+        msg += f"APY: {round(p.get('apy', 0), 2)}%\n"
+        msg += f"TVL: ${round(p.get('tvlUsd', 0) / 1e6, 2)}M\n"
 
         if p.get("apyPct1D") is not None:
-            msg += f"APY 24h: {round(p['apyPct1D'],2)}%\n"
+            msg += f"APY 24h: {round(p['apyPct1D'], 2)}%\n"
 
         if p.get("tvlUsdPct1D") is not None:
-            msg += f"TVL 24h: {round(p['tvlUsdPct1D'],2)}%\n"
+            msg += f"TVL 24h: {round(p['tvlUsdPct1D'], 2)}%\n"
 
         msg += recommended_range(p) + "\n"
         msg += fake_yield(p) + "\n"
@@ -166,20 +178,32 @@ def format_msg(pools):
             msg += snipe + "\n"
 
         msg += entry(p) + "\n"
+
+        pool_id = p.get("pool")
+        if pool_id:
+            msg += f"Lien: https://defillama.com/yields/pool/{pool_id}\n"
+
         msg += "────────────\n\n"
 
     return msg
 
 def send(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={
-        "chat_id": CHAT_ID,
-        "text": msg,
-        "disable_web_page_preview": True
-    }, timeout=20)
+    requests.post(
+        url,
+        json={
+            "chat_id": CHAT_ID,
+            "text": msg,
+            "disable_web_page_preview": True
+        },
+        timeout=20
+    )
 
 def run():
-    pools = requests.get("https://yields.llama.fi/pools", timeout=30).json()["data"]
+    response = requests.get("https://yields.llama.fi/pools", timeout=30)
+    response.raise_for_status()
+    pools = response.json()["data"]
+
     best = filter_pools(pools)
     send(format_msg(best))
 
@@ -193,7 +217,7 @@ while True:
         print("Erreur:", e)
         try:
             send(f"Erreur: {e}")
-        except:
+        except Exception:
             pass
 
     time.sleep(3600)
