@@ -1,6 +1,8 @@
 import os
 import requests
 import time
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -20,7 +22,17 @@ CHAINS = {
     "Ethereum","Arbitrum","Base","Optimism","Polygon","Avalanche","BNB"
 }
 
-# 🟢 RANGE EN %
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def start_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    server.serve_forever()
+
 def recommended_range(p):
     symbol = (p.get("symbol") or "").upper()
     stable = p.get("stablecoin")
@@ -44,7 +56,6 @@ def recommended_range(p):
 
     return f"Range: {base}"
 
-# 🧠 SCORE
 def get_score(p):
     apy = p.get("apy", 0)
     tvl = p.get("tvlUsd", 0)
@@ -71,7 +82,6 @@ def risk_label(p):
     elif s >= 3: return "🟠 MOYEN"
     return "🔴 RISQUÉ"
 
-# 🧠 FAKE YIELD
 def fake_yield(p):
     apy = p.get("apy", 0)
     apy_1d = p.get("apyPct1D")
@@ -84,7 +94,6 @@ def fake_yield(p):
 
     return "🧠 Yield OK"
 
-# 💎 PREMIUM SNIPER
 def sniper(p):
     tvl_1d = p.get("tvlUsdPct1D")
     apy_1d = p.get("apyPct1D")
@@ -95,7 +104,6 @@ def sniper(p):
 
     return ""
 
-# 🎯 ENTRY
 def entry(p):
     tvl_1d = p.get("tvlUsdPct1D")
     apy_1d = p.get("apyPct1D")
@@ -164,14 +172,19 @@ def format_msg(pools):
 
 def send(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": msg})
+    requests.post(url, json={
+        "chat_id": CHAT_ID,
+        "text": msg,
+        "disable_web_page_preview": True
+    }, timeout=20)
 
 def run():
-    pools = requests.get("https://yields.llama.fi/pools").json()["data"]
+    pools = requests.get("https://yields.llama.fi/pools", timeout=30).json()["data"]
     best = filter_pools(pools)
     send(format_msg(best))
 
-# 🔁 BOUCLE
+threading.Thread(target=start_server, daemon=True).start()
+
 while True:
     try:
         run()
@@ -183,4 +196,4 @@ while True:
         except:
             pass
 
-    time.sleep(3600)  # 1h
+    time.sleep(3600)
