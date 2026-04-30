@@ -19,7 +19,7 @@ CHAINS = {
     "Ethereum","Arbitrum","Base","Optimism","Polygon","Avalanche","BNB"
 }
 
-# 🟢 RANGE EN %
+# 🟢 RANGE
 def recommended_range(p):
     symbol = (p.get("symbol") or "").upper()
     stable = p.get("stablecoin")
@@ -45,7 +45,7 @@ def recommended_range(p):
 
 # 🧠 SCORE
 def get_score(p):
-    apy = p.get("apy", 0)
+    apy = p.get("apyMean30d") or p.get("apy", 0)
     tvl = p.get("tvlUsd", 0)
     il = p.get("ilRisk")
     project = p.get("project")
@@ -78,12 +78,15 @@ def fake_yield(p):
     if apy > 100:
         return "⚠️ APY très élevé (possible inflation)"
 
-    if apy_1d and abs(apy_1d) > 80:
-        return "⚠️ APY instable"
+    if apy_1d is not None and abs(apy_1d) > 80:
+        return "⚠️ APY très instable"
+
+    if apy_1d is not None and apy_1d > 25:
+        return "⚠️ APY instable (hausse rapide)"
 
     return "🧠 Yield OK"
 
-# 💎 PREMIUM SNIPER
+# 💎 SNIPER
 def sniper(p):
     tvl_1d = p.get("tvlUsdPct1D")
     apy_1d = p.get("apyPct1D")
@@ -121,7 +124,8 @@ def filter_pools(pools):
         if p.get("tvlUsd", 0) < MIN_TVL:
             continue
 
-        apy = p.get("apy", 0)
+        apy = p.get("apyMean30d") or p.get("apy", 0)
+
         if apy < MIN_APY or apy > MAX_APY:
             continue
 
@@ -130,9 +134,9 @@ def filter_pools(pools):
 
         results.append(p)
 
-    return sorted(results, key=lambda x: x["apy"], reverse=True)[:8]
+    return sorted(results, key=lambda x: x.get("apyMean30d") or x.get("apy",0), reverse=True)[:8]
 
-# 📝 FORMAT MESSAGE
+# 📝 FORMAT
 def format_msg(pools):
     if not pools:
         return "🛡️ SAFE MODE: aucune pool intéressante"
@@ -140,9 +144,15 @@ def format_msg(pools):
     msg = "🛡️ SAFE MODE + PRO + ELITE\n\n"
 
     for p in pools:
+        apy_spot = p.get("apy", 0)
+        apy_30d = p.get("apyMean30d") or apy_spot
+
         msg += f"{risk_label(p)}\n"
         msg += f"{p['symbol']} | {p['project']}\n"
-        msg += f"APY: {round(p.get('apy',0),2)}%\n"
+
+        msg += f"APY actuel: {round(apy_spot,2)}%\n"
+        msg += f"APY moyen 30j: {round(apy_30d,2)}%\n"
+
         msg += f"TVL: ${round(p.get('tvlUsd',0)/1e6,2)}M\n"
 
         if p.get("apyPct1D") is not None:
@@ -151,13 +161,10 @@ def format_msg(pools):
         if p.get("tvlUsdPct1D") is not None:
             msg += f"TVL 24h: {round(p['tvlUsdPct1D'],2)}%\n"
 
-        # 🔗 LIENS PRO
         msg += f"🔗 DefiLlama: https://defillama.com/yields/pool/{p.get('pool')}\n"
 
-        # BONUS PRO Dexscreener
-        if p.get("symbol"):
-            token = p['symbol'].split("-")[0]
-            msg += f"📊 Chart: https://dexscreener.com/search?q={token}\n"
+        token = p['symbol'].split("-")[0]
+        msg += f"📊 Chart: https://dexscreener.com/search?q={token}\n"
 
         msg += recommended_range(p) + "\n"
         msg += fake_yield(p) + "\n"
@@ -176,11 +183,11 @@ def send(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": CHAT_ID, "text": msg})
 
-# 🚀 RUN (CRON)
+# 🚀 RUN
 def run():
     pools = requests.get("https://yields.llama.fi/pools").json()["data"]
     best = filter_pools(pools)
     send(format_msg(best))
 
-# EXECUTION UNIQUE
+# EXECUTION (CRON)
 run()
