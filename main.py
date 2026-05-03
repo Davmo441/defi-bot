@@ -62,74 +62,94 @@ def token_category(token):
         return "btc"
     return "alt"
 
-def pair_type(p):
+def pair_name(p):
     tokens = get_tokens(p)
     if len(tokens) < 2:
-        return "Type paire: inconnu"
+        return "Inconnu"
 
     cats = [token_category(t) for t in tokens[:2]]
 
     if cats[0] == "stable" and cats[1] == "stable":
-        return "Type paire: Stable / Stable"
+        return "Stable / Stable"
     if set(cats) == {"eth", "btc"}:
-        return "Type paire: ETH / BTC"
+        return "ETH / BTC"
     if "eth" in cats and "stable" in cats:
-        return "Type paire: ETH / Stable"
+        return "ETH / Stable"
     if "btc" in cats and "stable" in cats:
-        return "Type paire: BTC / Stable"
+        return "BTC / Stable"
     if "stable" in cats and "alt" in cats:
-        return "Type paire: Altcoin / Stable"
+        return "Altcoin / Stable"
     if cats[0] == "alt" and cats[1] == "alt":
-        return "Type paire: Altcoin / Altcoin"
+        return "Altcoin / Altcoin"
 
-    return "Type paire: Mixte / Autre"
+    return "Mixte / Autre"
+
+def pair_type(p):
+    return f"Type paire: {pair_name(p)}"
+
+def il_estimator(p):
+    pair = pair_name(p)
+
+    if pair == "Stable / Stable":
+        return "🟢 IL FAIBLE (<1%)", "faible", 0.00
+
+    if pair == "ETH / BTC":
+        return "🟡 IL FAIBLE À MODÉRÉ (0.5–3%)", "modere", 0.10
+
+    if pair == "ETH / Stable":
+        return "⚠️ IL MODÉRÉ (1–5%)", "modere", 0.15
+
+    if pair == "BTC / Stable":
+        return "⚠️ IL MODÉRÉ (1–5%)", "modere", 0.15
+
+    if pair == "Altcoin / Stable":
+        return "⚠️ IL ÉLEVÉ (5–15%)", "eleve", 0.50
+
+    if pair == "Altcoin / Altcoin":
+        return "⚠️ IL POTENTIEL TRÈS ÉLEVÉ (>20%)", "tres_eleve", 1.00
+
+    return "⚠️ IL INCONNU — à vérifier manuellement", "inconnu", 0.30
 
 def real_il_risk(p):
-    pt = pair_type(p)
-
-    if "Stable / Stable" in pt:
-        return "Risque IL réel: 🟢 Faible"
-    if "ETH / BTC" in pt:
-        return "Risque IL réel: 🟠 Moyen"
-    if "ETH / Stable" in pt or "BTC / Stable" in pt:
-        return "Risque IL réel: 🟠 Moyen à élevé"
-    if "Altcoin / Stable" in pt:
-        return "Risque IL réel: 🔴 Élevé"
-    if "Altcoin / Altcoin" in pt:
-        return "Risque IL réel: 🔴 Très élevé"
-
-    return "Risque IL réel: 🟠 Inconnu / à vérifier"
+    text, _, _ = il_estimator(p)
+    return f"Risque IL estimé: {text}"
 
 def is_pair_too_dangerous(p):
-    pt = pair_type(p)
+    pair = pair_name(p)
     apy = p.get("apy") or 0
     tvl = p.get("tvlUsd") or 0
+    _, danger, _ = il_estimator(p)
 
-    if "Altcoin / Altcoin" in pt:
+    if pair == "Altcoin / Altcoin":
         return True
-    if "Altcoin / Stable" in pt and tvl < 20_000_000:
+
+    if danger == "tres_eleve":
         return True
-    if "Altcoin / Stable" in pt and apy > 80:
+
+    if pair == "Altcoin / Stable" and tvl < 20_000_000:
+        return True
+
+    if pair == "Altcoin / Stable" and apy > 80:
         return True
 
     return False
 
 def recommended_range(p):
-    pt = pair_type(p)
+    pair = pair_name(p)
     apy = p.get("apy") or 0
     il = p.get("ilRisk")
 
-    if "Stable / Stable" in pt:
+    if pair == "Stable / Stable":
         base = "±0.5% à ±2%"
-    elif "ETH / BTC" in pt:
+    elif pair == "ETH / BTC":
         base = "±8% à ±15%"
-    elif "ETH / Stable" in pt:
+    elif pair == "ETH / Stable":
         base = "±15% à ±30%"
-    elif "BTC / Stable" in pt:
+    elif pair == "BTC / Stable":
         base = "±12% à ±25%"
-    elif "Altcoin / Stable" in pt:
+    elif pair == "Altcoin / Stable":
         base = "±30% à ±60%"
-    elif "Altcoin / Altcoin" in pt:
+    elif pair == "Altcoin / Altcoin":
         base = "±50% à ±100% — déconseillé"
     else:
         base = "±20% à ±40%"
@@ -146,7 +166,8 @@ def get_score(p):
     tvl = p.get("tvlUsd") or 0
     il = p.get("ilRisk")
     project = p.get("project")
-    pt = pair_type(p)
+    pair = pair_name(p)
+    _, danger, _ = il_estimator(p)
 
     score = 0
 
@@ -167,15 +188,20 @@ def get_score(p):
     if project in SOLID_PROTOCOLS:
         score += 2
 
-    if "Stable / Stable" in pt:
+    if pair == "Stable / Stable":
         score += 2
-    elif "ETH / BTC" in pt:
+    elif pair == "ETH / BTC":
         score += 1
-    elif "ETH / Stable" in pt or "BTC / Stable" in pt:
+    elif pair in ["ETH / Stable", "BTC / Stable"]:
         score -= 1
-    elif "Altcoin / Stable" in pt:
+    elif pair == "Altcoin / Stable":
         score -= 3
-    elif "Altcoin / Altcoin" in pt:
+    elif pair == "Altcoin / Altcoin":
+        score -= 5
+
+    if danger == "eleve":
+        score -= 2
+    elif danger == "tres_eleve":
         score -= 5
 
     return score
@@ -239,8 +265,11 @@ def decision(p):
     apy_1d = p.get("apyPct1D")
     tvl_1d = p.get("tvlUsdPct1D")
     score = get_score(p)
+    _, danger, _ = il_estimator(p)
 
-    # 🔴 Sorties prioritaires
+    if danger == "tres_eleve":
+        return "🔴 ÉVITER (IL trop élevé)"
+
     if tvl_1d is not None and tvl_1d <= -15:
         return "🔴 SORTIE URGENTE (TVL chute forte)"
 
@@ -253,7 +282,6 @@ def decision(p):
     if apy < apy_30d * 0.70:
         return "🔴 SORTIE À ENVISAGER"
 
-    # 🟠 Dégradation fine
     if apy_1d is not None and -15 <= apy_1d < -5:
         return "🟠 DÉGRADATION (APY baisse)"
 
@@ -263,7 +291,6 @@ def decision(p):
     if apy_1d is not None and apy_1d > 25:
         return "🟠 ATTENDRE (surchauffe)"
 
-    # 🟢 Entrée améliorée
     if sweet_spot(p):
         return "🟢 ENTRÉE POSSIBLE — SWEET SPOT"
 
@@ -273,7 +300,6 @@ def decision(p):
     if apy >= apy_30d and apy_1d is not None and 0 <= apy_1d < 15 and score >= 3:
         return "🟢 ENTRÉE POSSIBLE"
 
-    # 🟡 Surveillance constructive
     if apy >= apy_30d * 0.90 and score >= 3:
         return "🟡 SURVEILLER — encore correct"
 
@@ -282,35 +308,30 @@ def decision(p):
 def capital_allocation(p):
     score = get_score(p)
     d = decision(p)
-    pt = pair_type(p)
+    pair = pair_name(p)
+    _, danger, reduction = il_estimator(p)
 
-    if "SORTIE" in d:
+    if "SORTIE" in d or "ÉVITER" in d:
         return "💰 Allocation: 0€ — sortie / pas d'entrée"
 
-    if "Altcoin / Stable" in pt:
-        amount = CAPITAL_TOTAL * 0.03
-        return f"💰 Allocation risquée: ~{round(amount, 2)}€ max (3% du capital)"
+    if pair == "Altcoin / Stable":
+        base_pct = 0.03
+    elif sniper(p):
+        base_pct = 0.08
+    elif sweet_spot(p):
+        base_pct = 0.15 if score >= 5 else 0.08
+    elif "ENTRÉE POSSIBLE" in d:
+        base_pct = 0.12 if score >= 5 else 0.06
+    else:
+        base_pct = 0.00
 
-    if sniper(p):
-        amount = CAPITAL_TOTAL * 0.08
-        return f"💰 Allocation sniper: ~{round(amount, 2)}€ max (8% du capital)"
+    adjusted_pct = base_pct * (1 - reduction)
+    amount = CAPITAL_TOTAL * adjusted_pct
 
-    if sweet_spot(p):
-        if score >= 5:
-            amount = CAPITAL_TOTAL * 0.15
-            return f"💰 Allocation sweet spot: ~{round(amount, 2)}€ max (15% du capital)"
-        amount = CAPITAL_TOTAL * 0.08
-        return f"💰 Allocation prudente: ~{round(amount, 2)}€ max (8% du capital)"
+    if adjusted_pct == 0:
+        return "💰 Allocation: 0€ — signal insuffisant"
 
-    if "ENTRÉE POSSIBLE" in d:
-        if score >= 5:
-            amount = CAPITAL_TOTAL * 0.12
-            return f"💰 Allocation entrée: ~{round(amount, 2)}€ max (12% du capital)"
-        if score >= 3:
-            amount = CAPITAL_TOTAL * 0.06
-            return f"💰 Allocation entrée prudente: ~{round(amount, 2)}€ max (6% du capital)"
-
-    return "💰 Allocation: 0€ — signal insuffisant"
+    return f"💰 Allocation ajustée IL: ~{round(amount, 2)}€ max ({round(adjusted_pct*100, 1)}% du capital)"
 
 def priority_score(p):
     d = decision(p)
@@ -319,6 +340,8 @@ def priority_score(p):
         return 20_000
     if "SORTIE" in d:
         return 10_000
+    if "ÉVITER" in d:
+        return -10_000
 
     score = get_score(p)
 
