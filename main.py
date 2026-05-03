@@ -11,7 +11,7 @@ MIN_TVL = 8_000_000
 MIN_APY = 20
 MAX_APY = 120
 
-CAPITAL_TOTAL = 10_000  # adapte ici ton capital total en €
+CAPITAL_TOTAL = 10_000
 
 SOLID_PROTOCOLS = {
     "uniswap-v3", "curve-dex", "aave-v3", "gmx", "compound-v3",
@@ -24,14 +24,12 @@ CHAINS = {
     "Ethereum", "Arbitrum", "Base", "Optimism", "Polygon", "Avalanche", "BNB"
 }
 
-# 🔌 DATABASE
 def connect_db():
     return psycopg2.connect(DATABASE_URL)
 
 def init_db():
     conn = connect_db()
     cur = conn.cursor()
-
     cur.execute("""
         CREATE TABLE IF NOT EXISTS alerts (
             pool_id TEXT PRIMARY KEY,
@@ -41,12 +39,10 @@ def init_db():
             updated_at TIMESTAMP
         )
     """)
-
     conn.commit()
     cur.close()
     conn.close()
 
-# 🟢 RANGE
 def recommended_range(p):
     symbol = (p.get("symbol") or "").upper()
     stable = p.get("stablecoin")
@@ -64,13 +60,11 @@ def recommended_range(p):
 
     if apy > 80:
         base += " (volatilité élevée)"
-
     if il == "yes":
         base += " ⚠️ IL élevé → range large conseillé"
 
     return f"Range: {base}"
 
-# 🧠 SCORE
 def get_score(p):
     apy = p.get("apyMean30d") or p.get("apy") or 0
     tvl = p.get("tvlUsd") or 0
@@ -93,7 +87,6 @@ def get_score(p):
 
     if il == "yes":
         score -= 3
-
     if project in SOLID_PROTOCOLS:
         score += 2
 
@@ -107,53 +100,19 @@ def risk_label(p):
         return "🟠 MOYEN"
     return "🔴 RISQUÉ"
 
-# 💰 CAPITAL ALLOCATION
-def capital_allocation(p):
-    score = get_score(p)
-    d = decision(p)
-
-    if d == "🔴 SORTIE À ENVISAGER" or d == "🔴 SORTIE À SURVEILLER (TVL baisse)":
-        return "💰 Allocation: 0€ — sortie / pas d'entrée"
-
-    if "SNIPER" in sniper(p):
-        amount = CAPITAL_TOTAL * 0.10
-        return f"💰 Allocation sniper: ~{round(amount, 2)}€ max (10% du capital)"
-
-    if sweet_spot(p):
-        if score >= 5:
-            amount = CAPITAL_TOTAL * 0.15
-            return f"💰 Allocation sweet spot: ~{round(amount, 2)}€ max (15% du capital)"
-        else:
-            amount = CAPITAL_TOTAL * 0.08
-            return f"💰 Allocation prudente: ~{round(amount, 2)}€ max (8% du capital)"
-
-    if d == "🟢 ENTRÉE POSSIBLE":
-        if score >= 5:
-            amount = CAPITAL_TOTAL * 0.12
-            return f"💰 Allocation entrée: ~{round(amount, 2)}€ max (12% du capital)"
-        elif score >= 3:
-            amount = CAPITAL_TOTAL * 0.06
-            return f"💰 Allocation entrée prudente: ~{round(amount, 2)}€ max (6% du capital)"
-
-    return "💰 Allocation: 0€ — signal insuffisant"
-
-# 🧠 FAKE YIELD
 def fake_yield(p):
     apy = p.get("apy") or 0
     apy_1d = p.get("apyPct1D")
 
     if apy > 100:
         return "⚠️ APY très élevé (possible inflation)"
-
     if apy_1d is not None and abs(apy_1d) > 80:
         return "⚠️ APY très instable"
-
     if apy_1d is not None and apy_1d > 25:
         return "⚠️ APY instable (hausse rapide)"
 
     return "🧠 Yield OK"
 
-# 📈 MOMENTUM
 def momentum(p):
     tvl_1d = p.get("tvlUsdPct1D")
     apy_1d = p.get("apyPct1D")
@@ -166,7 +125,6 @@ def momentum(p):
 
     return ""
 
-# 💎 SNIPER
 def sniper(p):
     tvl_1d = p.get("tvlUsdPct1D")
     apy = p.get("apy") or 0
@@ -177,7 +135,6 @@ def sniper(p):
 
     return ""
 
-# 🟢 SWEET SPOT
 def sweet_spot(p):
     apy = p.get("apy") or 0
     apy_30d = p.get("apyMean30d") or apy
@@ -188,7 +145,6 @@ def sweet_spot(p):
 
     return ""
 
-# 🎯 DECISION
 def decision(p):
     apy = p.get("apy") or 0
     apy_30d = p.get("apyMean30d") or apy
@@ -209,17 +165,64 @@ def decision(p):
 
     return "🎯 NEUTRE"
 
-# 🔍 FILTER
+def capital_allocation(p):
+    score = get_score(p)
+    d = decision(p)
+
+    if d in ["🔴 SORTIE À ENVISAGER", "🔴 SORTIE À SURVEILLER (TVL baisse)"]:
+        return "💰 Allocation: 0€ — sortie / pas d'entrée"
+
+    if sniper(p):
+        amount = CAPITAL_TOTAL * 0.10
+        return f"💰 Allocation sniper: ~{round(amount, 2)}€ max (10% du capital)"
+
+    if sweet_spot(p):
+        if score >= 5:
+            amount = CAPITAL_TOTAL * 0.15
+            return f"💰 Allocation sweet spot: ~{round(amount, 2)}€ max (15% du capital)"
+        amount = CAPITAL_TOTAL * 0.08
+        return f"💰 Allocation prudente: ~{round(amount, 2)}€ max (8% du capital)"
+
+    if d == "🟢 ENTRÉE POSSIBLE":
+        if score >= 5:
+            amount = CAPITAL_TOTAL * 0.12
+            return f"💰 Allocation entrée: ~{round(amount, 2)}€ max (12% du capital)"
+        if score >= 3:
+            amount = CAPITAL_TOTAL * 0.06
+            return f"💰 Allocation entrée prudente: ~{round(amount, 2)}€ max (6% du capital)"
+
+    return "💰 Allocation: 0€ — signal insuffisant"
+
+def priority_score(p):
+    d = decision(p)
+
+    if d in ["🔴 SORTIE À ENVISAGER", "🔴 SORTIE À SURVEILLER (TVL baisse)"]:
+        return 10_000
+
+    score = get_score(p)
+
+    if sweet_spot(p):
+        score += 500
+
+    if sniper(p):
+        score += 400
+
+    if d == "🟢 ENTRÉE POSSIBLE":
+        score += 300
+
+    if momentum(p) == "📈 Momentum positif":
+        score += 100
+
+    return score
+
 def filter_pools(pools):
     results = []
 
     for p in pools:
         if p.get("chain") not in CHAINS:
             continue
-
         if p.get("project") not in SOLID_PROTOCOLS:
             continue
-
         if (p.get("tvlUsd") or 0) < MIN_TVL:
             continue
 
@@ -228,40 +231,27 @@ def filter_pools(pools):
 
         if apy_current < MIN_APY:
             continue
-
         if apy_30d < MIN_APY or apy_30d > MAX_APY:
             continue
-
         if risk_label(p) == "🔴 RISQUÉ":
             continue
-
-        # ✅ Ignore les pools neutres
         if decision(p) == "🎯 NEUTRE":
             continue
 
         results.append(p)
 
-    return sorted(
-        results,
-        key=lambda x: x.get("apyMean30d") or x.get("apy") or 0,
-        reverse=True
-    )[:8]
+    return sorted(results, key=priority_score, reverse=True)[:5]
 
-# 🧠 POSTGRES ANTI-DOUBLON
 def get_old_signal(pool_id):
     conn = connect_db()
     cur = conn.cursor()
-
     cur.execute(
         "SELECT last_apy, last_tvl, last_decision FROM alerts WHERE pool_id = %s",
         (pool_id,)
     )
-
     row = cur.fetchone()
-
     cur.close()
     conn.close()
-
     return row
 
 def is_new_signal(pool_id, apy, tvl, current_decision):
@@ -274,10 +264,8 @@ def is_new_signal(pool_id, apy, tvl, current_decision):
 
     if abs(apy - last_apy) >= 5:
         return True
-
     if abs(tvl - last_tvl) >= 5_000_000:
         return True
-
     if current_decision != last_decision:
         return True
 
@@ -286,7 +274,6 @@ def is_new_signal(pool_id, apy, tvl, current_decision):
 def save_signal(pool_id, apy, tvl, current_decision):
     conn = connect_db()
     cur = conn.cursor()
-
     cur.execute("""
         INSERT INTO alerts (pool_id, last_apy, last_tvl, last_decision, updated_at)
         VALUES (%s, %s, %s, %s, %s)
@@ -297,12 +284,10 @@ def save_signal(pool_id, apy, tvl, current_decision):
             last_decision = EXCLUDED.last_decision,
             updated_at = EXCLUDED.updated_at
     """, (pool_id, apy, tvl, current_decision, datetime.utcnow()))
-
     conn.commit()
     cur.close()
     conn.close()
 
-# 📝 MESSAGE
 def format_pool(p):
     pool_id = p.get("pool")
     symbol = p.get("symbol")
@@ -314,8 +299,16 @@ def format_pool(p):
     tvl = p.get("tvlUsd") or 0
     apy_1d = p.get("apyPct1D")
     tvl_1d = p.get("tvlUsdPct1D")
+    d = decision(p)
 
     msg = ""
+
+    if d in ["🔴 SORTIE À ENVISAGER", "🔴 SORTIE À SURVEILLER (TVL baisse)"]:
+        msg += "🚨🚨 EXIT URGENT — ALERTE SORTIE 🚨🚨\n"
+
+    if sweet_spot(p) or sniper(p):
+        msg += "🔥 PRIORITÉ ENTRÉE — SIGNAL FORT 🔥\n"
+
     msg += f"{risk_label(p)}\n"
     msg += f"{symbol} | {project}\n"
     msg += f"Chain: {chain}\n"
@@ -348,14 +341,13 @@ def format_pool(p):
         msg += sn + "\n"
 
     msg += fake_yield(p) + "\n"
-    msg += decision(p) + "\n"
+    msg += d + "\n"
     msg += capital_allocation(p) + "\n"
     msg += recommended_range(p) + "\n"
     msg += "────────────\n\n"
 
     return msg
 
-# 📤 TELEGRAM
 def send(msg):
     if not msg:
         return
@@ -374,7 +366,6 @@ def send(msg):
             timeout=20
         )
 
-# 🚀 RUN
 def run():
     init_db()
 
