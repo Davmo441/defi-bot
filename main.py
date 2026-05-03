@@ -13,6 +13,10 @@ MAX_APY = 120
 
 CAPITAL_TOTAL = 10_000
 
+STABLES = {"USDC", "USDT", "DAI", "FRAX", "LUSD", "USDE", "SUSDE", "USDS", "GHO", "PYUSD"}
+ETH_ASSETS = {"ETH", "WETH", "STETH", "WSTETH", "RETH", "CBETH"}
+BTC_ASSETS = {"BTC", "WBTC", "CBBTC", "TBTC"}
+
 SOLID_PROTOCOLS = {
     "uniswap-v3", "curve-dex", "aave-v3", "gmx", "compound-v3",
     "balancer-v2", "morpho-blue", "beefy", "convex-finance",
@@ -43,33 +47,121 @@ def init_db():
     cur.close()
     conn.close()
 
-def recommended_range(p):
+def get_tokens(p):
     symbol = (p.get("symbol") or "").upper()
-    stable = p.get("stablecoin")
-    il = p.get("ilRisk")
-    apy = p.get("apy") or 0
+    clean = symbol.replace("/", "-").replace("_", "-")
+    return [x.strip() for x in clean.split("-") if x.strip()]
 
-    if stable:
+def token_category(token):
+    token = token.upper()
+
+    if token in STABLES:
+        return "stable"
+    if token in ETH_ASSETS:
+        return "eth"
+    if token in BTC_ASSETS:
+        return "btc"
+
+    return "alt"
+
+def pair_type(p):
+    tokens = get_tokens(p)
+
+    if len(tokens) < 2:
+        return "Type paire: inconnu"
+
+    cats = [token_category(t) for t in tokens[:2]]
+
+    if cats[0] == "stable" and cats[1] == "stable":
+        return "Type paire: Stable / Stable"
+
+    if set(cats) == {"eth", "btc"}:
+        return "Type paire: ETH / BTC"
+
+    if "eth" in cats and "stable" in cats:
+        return "Type paire: ETH / Stable"
+
+    if "btc" in cats and "stable" in cats:
+        return "Type paire: BTC / Stable"
+
+    if "stable" in cats and "alt" in cats:
+        return "Type paire: Altcoin / Stable"
+
+    if cats[0] == "alt" and cats[1] == "alt":
+        return "Type paire: Altcoin / Altcoin"
+
+    return "Type paire: Mixte / Autre"
+
+def real_il_risk(p):
+    pt = pair_type(p)
+
+    if "Stable / Stable" in pt:
+        return "Risque IL réel: 🟢 Faible"
+
+    if "ETH / BTC" in pt:
+        return "Risque IL réel: 🟠 Moyen"
+
+    if "ETH / Stable" in pt or "BTC / Stable" in pt:
+        return "Risque IL réel: 🟠 Moyen à élevé"
+
+    if "Altcoin / Stable" in pt:
+        return "Risque IL réel: 🔴 Élevé"
+
+    if "Altcoin / Altcoin" in pt:
+        return "Risque IL réel: 🔴 Très élevé"
+
+    return "Risque IL réel: 🟠 Inconnu / à vérifier"
+
+def is_pair_too_dangerous(p):
+    pt = pair_type(p)
+    apy = p.get("apy") or 0
+    tvl = p.get("tvlUsd") or 0
+
+    if "Altcoin / Altcoin" in pt:
+        return True
+
+    if "Altcoin / Stable" in pt and tvl < 20_000_000:
+        return True
+
+    if "Altcoin / Stable" in pt and apy > 80:
+        return True
+
+    return False
+
+def recommended_range(p):
+    pt = pair_type(p)
+    apy = p.get("apy") or 0
+    il = p.get("ilRisk")
+
+    if "Stable / Stable" in pt:
         base = "±0.5% à ±2%"
-    elif "BTC" in symbol:
+    elif "ETH / BTC" in pt:
         base = "±8% à ±15%"
-    elif "ETH" in symbol:
+    elif "ETH / Stable" in pt:
         base = "±15% à ±30%"
+    elif "BTC / Stable" in pt:
+        base = "±12% à ±25%"
+    elif "Altcoin / Stable" in pt:
+        base = "±30% à ±60%"
+    elif "Altcoin / Altcoin" in pt:
+        base = "±50% à ±100% — déconseillé"
     else:
         base = "±20% à ±40%"
 
     if apy > 80:
-        base += " (volatilité élevée)"
+        base += " (élargir: volatilité élevée)"
+
     if il == "yes":
         base += " ⚠️ IL élevé → range large conseillé"
 
-    return f"Range: {base}"
+    return f"Range ajustée: {base}"
 
 def get_score(p):
     apy = p.get("apyMean30d") or p.get("apy") or 0
     tvl = p.get("tvlUsd") or 0
     il = p.get("ilRisk")
     project = p.get("project")
+    pt = pair_type(p)
 
     score = 0
 
@@ -86,9 +178,21 @@ def get_score(p):
         score += 2
 
     if il == "yes":
-        score -= 3
+        score -= 2
+
     if project in SOLID_PROTOCOLS:
         score += 2
+
+    if "Stable / Stable" in pt:
+        score += 2
+    elif "ETH / BTC" in pt:
+        score += 1
+    elif "ETH / Stable" in pt or "BTC / Stable" in pt:
+        score -= 1
+    elif "Altcoin / Stable" in pt:
+        score -= 3
+    elif "Altcoin / Altcoin" in pt:
+        score -= 5
 
     return score
 
@@ -168,13 +272,18 @@ def decision(p):
 def capital_allocation(p):
     score = get_score(p)
     d = decision(p)
+    pt = pair_type(p)
 
     if d in ["🔴 SORTIE À ENVISAGER", "🔴 SORTIE À SURVEILLER (TVL baisse)"]:
         return "💰 Allocation: 0€ — sortie / pas d'entrée"
 
+    if "Altcoin / Stable" in pt:
+        amount = CAPITAL_TOTAL * 0.03
+        return f"💰 Allocation risquée: ~{round(amount, 2)}€ max (3% du capital)"
+
     if sniper(p):
-        amount = CAPITAL_TOTAL * 0.10
-        return f"💰 Allocation sniper: ~{round(amount, 2)}€ max (10% du capital)"
+        amount = CAPITAL_TOTAL * 0.08
+        return f"💰 Allocation sniper: ~{round(amount, 2)}€ max (8% du capital)"
 
     if sweet_spot(p):
         if score >= 5:
@@ -203,13 +312,10 @@ def priority_score(p):
 
     if sweet_spot(p):
         score += 500
-
     if sniper(p):
         score += 400
-
     if d == "🟢 ENTRÉE POSSIBLE":
         score += 300
-
     if momentum(p) == "📈 Momentum positif":
         score += 100
 
@@ -232,6 +338,8 @@ def filter_pools(pools):
         if apy_current < MIN_APY:
             continue
         if apy_30d < MIN_APY or apy_30d > MAX_APY:
+            continue
+        if is_pair_too_dangerous(p):
             continue
         if risk_label(p) == "🔴 RISQUÉ":
             continue
@@ -262,9 +370,9 @@ def is_new_signal(pool_id, apy, tvl, current_decision):
 
     last_apy, last_tvl, last_decision = old
 
-    if abs(apy - last_apy) >= 5:
+    if abs(apy - last_apy) >= 3:
         return True
-    if abs(tvl - last_tvl) >= 5_000_000:
+    if abs(tvl - last_tvl) >= 3_000_000:
         return True
     if current_decision != last_decision:
         return True
@@ -318,10 +426,11 @@ def format_pool(p):
 
     if apy_1d is not None:
         msg += f"APY 24h: {round(apy_1d, 2)}%\n"
-
     if tvl_1d is not None:
         msg += f"TVL 24h: {round(tvl_1d, 2)}%\n"
 
+    msg += pair_type(p) + "\n"
+    msg += real_il_risk(p) + "\n"
     msg += f"🔗 https://defillama.com/yields/pool/{pool_id}\n"
 
     token = (symbol or "").split("-")[0]
