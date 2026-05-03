@@ -54,19 +54,16 @@ def get_tokens(p):
 
 def token_category(token):
     token = token.upper()
-
     if token in STABLES:
         return "stable"
     if token in ETH_ASSETS:
         return "eth"
     if token in BTC_ASSETS:
         return "btc"
-
     return "alt"
 
 def pair_type(p):
     tokens = get_tokens(p)
-
     if len(tokens) < 2:
         return "Type paire: inconnu"
 
@@ -74,19 +71,14 @@ def pair_type(p):
 
     if cats[0] == "stable" and cats[1] == "stable":
         return "Type paire: Stable / Stable"
-
     if set(cats) == {"eth", "btc"}:
         return "Type paire: ETH / BTC"
-
     if "eth" in cats and "stable" in cats:
         return "Type paire: ETH / Stable"
-
     if "btc" in cats and "stable" in cats:
         return "Type paire: BTC / Stable"
-
     if "stable" in cats and "alt" in cats:
         return "Type paire: Altcoin / Stable"
-
     if cats[0] == "alt" and cats[1] == "alt":
         return "Type paire: Altcoin / Altcoin"
 
@@ -97,16 +89,12 @@ def real_il_risk(p):
 
     if "Stable / Stable" in pt:
         return "Risque IL réel: 🟢 Faible"
-
     if "ETH / BTC" in pt:
         return "Risque IL réel: 🟠 Moyen"
-
     if "ETH / Stable" in pt or "BTC / Stable" in pt:
         return "Risque IL réel: 🟠 Moyen à élevé"
-
     if "Altcoin / Stable" in pt:
         return "Risque IL réel: 🔴 Élevé"
-
     if "Altcoin / Altcoin" in pt:
         return "Risque IL réel: 🔴 Très élevé"
 
@@ -119,10 +107,8 @@ def is_pair_too_dangerous(p):
 
     if "Altcoin / Altcoin" in pt:
         return True
-
     if "Altcoin / Stable" in pt and tvl < 20_000_000:
         return True
-
     if "Altcoin / Stable" in pt and apy > 80:
         return True
 
@@ -150,7 +136,6 @@ def recommended_range(p):
 
     if apy > 80:
         base += " (élargir: volatilité élevée)"
-
     if il == "yes":
         base += " ⚠️ IL élevé → range large conseillé"
 
@@ -179,7 +164,6 @@ def get_score(p):
 
     if il == "yes":
         score -= 2
-
     if project in SOLID_PROTOCOLS:
         score += 2
 
@@ -254,18 +238,44 @@ def decision(p):
     apy_30d = p.get("apyMean30d") or apy
     apy_1d = p.get("apyPct1D")
     tvl_1d = p.get("tvlUsdPct1D")
+    score = get_score(p)
 
-    if apy >= apy_30d and apy_1d is not None and 0 <= apy_1d < 15:
-        return "🟢 ENTRÉE POSSIBLE"
+    # 🔴 Sorties prioritaires
+    if tvl_1d is not None and tvl_1d <= -15:
+        return "🔴 SORTIE URGENTE (TVL chute forte)"
+
+    if apy < apy_30d * 0.60:
+        return "🔴 SORTIE URGENTE (APY effondré)"
+
+    if tvl_1d is not None and tvl_1d < -10:
+        return "🔴 SORTIE À SURVEILLER (TVL baisse)"
+
+    if apy < apy_30d * 0.70:
+        return "🔴 SORTIE À ENVISAGER"
+
+    # 🟠 Dégradation fine
+    if apy_1d is not None and -15 <= apy_1d < -5:
+        return "🟠 DÉGRADATION (APY baisse)"
+
+    if tvl_1d is not None and -10 <= tvl_1d < -3:
+        return "🟠 DÉGRADATION (TVL baisse légère)"
 
     if apy_1d is not None and apy_1d > 25:
         return "🟠 ATTENDRE (surchauffe)"
 
-    if apy < apy_30d * 0.7:
-        return "🔴 SORTIE À ENVISAGER"
+    # 🟢 Entrée améliorée
+    if sweet_spot(p):
+        return "🟢 ENTRÉE POSSIBLE — SWEET SPOT"
 
-    if tvl_1d is not None and tvl_1d < -10:
-        return "🔴 SORTIE À SURVEILLER (TVL baisse)"
+    if sniper(p) and score >= 3:
+        return "🟢 ENTRÉE POSSIBLE — SNIPER"
+
+    if apy >= apy_30d and apy_1d is not None and 0 <= apy_1d < 15 and score >= 3:
+        return "🟢 ENTRÉE POSSIBLE"
+
+    # 🟡 Surveillance constructive
+    if apy >= apy_30d * 0.90 and score >= 3:
+        return "🟡 SURVEILLER — encore correct"
 
     return "🎯 NEUTRE"
 
@@ -274,7 +284,7 @@ def capital_allocation(p):
     d = decision(p)
     pt = pair_type(p)
 
-    if d in ["🔴 SORTIE À ENVISAGER", "🔴 SORTIE À SURVEILLER (TVL baisse)"]:
+    if "SORTIE" in d:
         return "💰 Allocation: 0€ — sortie / pas d'entrée"
 
     if "Altcoin / Stable" in pt:
@@ -292,7 +302,7 @@ def capital_allocation(p):
         amount = CAPITAL_TOTAL * 0.08
         return f"💰 Allocation prudente: ~{round(amount, 2)}€ max (8% du capital)"
 
-    if d == "🟢 ENTRÉE POSSIBLE":
+    if "ENTRÉE POSSIBLE" in d:
         if score >= 5:
             amount = CAPITAL_TOTAL * 0.12
             return f"💰 Allocation entrée: ~{round(amount, 2)}€ max (12% du capital)"
@@ -305,7 +315,9 @@ def capital_allocation(p):
 def priority_score(p):
     d = decision(p)
 
-    if d in ["🔴 SORTIE À ENVISAGER", "🔴 SORTIE À SURVEILLER (TVL baisse)"]:
+    if "SORTIE URGENTE" in d:
+        return 20_000
+    if "SORTIE" in d:
         return 10_000
 
     score = get_score(p)
@@ -314,10 +326,12 @@ def priority_score(p):
         score += 500
     if sniper(p):
         score += 400
-    if d == "🟢 ENTRÉE POSSIBLE":
+    if "ENTRÉE POSSIBLE" in d:
         score += 300
     if momentum(p) == "📈 Momentum positif":
         score += 100
+    if "DÉGRADATION" in d:
+        score += 50
 
     return score
 
@@ -411,11 +425,16 @@ def format_pool(p):
 
     msg = ""
 
-    if d in ["🔴 SORTIE À ENVISAGER", "🔴 SORTIE À SURVEILLER (TVL baisse)"]:
-        msg += "🚨🚨 EXIT URGENT — ALERTE SORTIE 🚨🚨\n"
+    if "SORTIE URGENTE" in d:
+        msg += "🚨🚨🚨 EXIT URGENT — SORTIE IMMÉDIATE À ANALYSER 🚨🚨🚨\n"
+    elif "SORTIE" in d:
+        msg += "🚨🚨 EXIT — ALERTE SORTIE 🚨🚨\n"
 
     if sweet_spot(p) or sniper(p):
         msg += "🔥 PRIORITÉ ENTRÉE — SIGNAL FORT 🔥\n"
+
+    if "DÉGRADATION" in d:
+        msg += "🟠 WARNING — POSITION À SURVEILLER 🟠\n"
 
     msg += f"{risk_label(p)}\n"
     msg += f"{symbol} | {project}\n"
