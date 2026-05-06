@@ -1,7 +1,7 @@
 import os
 import requests
 import psycopg2
-from datetime import datetime
+from datetime import datetime, timezone
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -10,7 +10,6 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 MIN_TVL = 8_000_000
 MIN_APY = 20
 MAX_APY = 120
-
 CAPITAL_TOTAL = 10_000
 
 STABLES = {"USDC", "USDT", "DAI", "FRAX", "LUSD", "USDE", "SUSDE", "USDS", "GHO", "PYUSD"}
@@ -27,6 +26,9 @@ SOLID_PROTOCOLS = {
 CHAINS = {
     "Ethereum", "Arbitrum", "Base", "Optimism", "Polygon", "Avalanche", "BNB"
 }
+
+def now_utc():
+    return datetime.now(timezone.utc)
 
 def connect_db():
     return psycopg2.connect(DATABASE_URL)
@@ -61,14 +63,12 @@ def get_tokens(p):
 
 def token_category(token):
     token = token.upper()
-
     if token in STABLES:
         return "stable"
     if token in ETH_ASSETS:
         return "eth"
     if token in BTC_ASSETS:
         return "btc"
-
     return "alt"
 
 def pair_name(p):
@@ -102,19 +102,14 @@ def il_estimator(p):
 
     if pair == "Stable / Stable":
         return "🟢 IL FAIBLE (<1%)", "faible", 0.00
-
     if pair == "ETH / BTC":
         return "🟡 IL FAIBLE À MODÉRÉ (0.5–3%)", "modere", 0.10
-
     if pair == "ETH / Stable":
         return "⚠️ IL MODÉRÉ (1–5%)", "modere", 0.15
-
     if pair == "BTC / Stable":
         return "⚠️ IL MODÉRÉ (1–5%)", "modere", 0.15
-
     if pair == "Altcoin / Stable":
         return "⚠️ IL ÉLEVÉ (5–15%)", "eleve", 0.50
-
     if pair == "Altcoin / Altcoin":
         return "⚠️ IL POTENTIEL TRÈS ÉLEVÉ (>20%)", "tres_eleve", 1.00
 
@@ -132,13 +127,10 @@ def is_pair_too_dangerous(p):
 
     if pair == "Altcoin / Altcoin":
         return True
-
     if danger == "tres_eleve":
         return True
-
     if pair == "Altcoin / Stable" and tvl < 20_000_000:
         return True
-
     if pair == "Altcoin / Stable" and apy > 80:
         return True
 
@@ -166,7 +158,6 @@ def recommended_range(p):
 
     if apy > 80:
         base += " (élargir: volatilité élevée)"
-
     if il == "yes":
         base += " ⚠️ IL élevé → range large conseillé"
 
@@ -196,7 +187,6 @@ def get_score(p):
 
     if il == "yes":
         score -= 2
-
     if project in SOLID_PROTOCOLS:
         score += 2
 
@@ -220,12 +210,10 @@ def get_score(p):
 
 def risk_label(p):
     s = get_score(p)
-
     if s >= 5:
         return "🟢 SAFE"
     elif s >= 3:
         return "🟠 MOYEN"
-
     return "🔴 RISQUÉ"
 
 def fake_yield(p):
@@ -234,10 +222,8 @@ def fake_yield(p):
 
     if apy > 100:
         return "⚠️ APY très élevé (possible inflation)"
-
     if apy_1d is not None and abs(apy_1d) > 80:
         return "⚠️ APY très instable"
-
     if apy_1d is not None and apy_1d > 25:
         return "⚠️ APY instable (hausse rapide)"
 
@@ -250,7 +236,6 @@ def momentum(p):
     if tvl_1d is not None and apy_1d is not None:
         if tvl_1d > 10 and apy_1d > 0:
             return "📈 Momentum positif"
-
         if tvl_1d < -10:
             return "📉 Momentum négatif"
 
@@ -278,15 +263,12 @@ def sweet_spot(p):
 
 def market_state(p):
     apy_1d = p.get("apyPct1D")
-
     if apy_1d is not None and apy_1d < -5:
         return "COOLDOWN"
-
     return "NORMAL"
 
 def volume_ratio(p):
     tvl = p.get("tvlUsd") or 0
-
     volume = (
         p.get("volumeUsd1d")
         or p.get("volumeUsd24h")
@@ -326,13 +308,10 @@ def timing_label(p):
 
     if apy > apy_30d * 1.4:
         return "Timing: 🟠 LATE ENTRY — APY déjà trop au-dessus du 30j"
-
     if apy_1d is not None and apy_1d > 10:
         return "Timing: 🟠 POSSIBLE SOMMET COURT TERME"
-
     if apy_1d is not None and 0 <= apy_1d <= 8 and apy <= apy_30d * 1.2:
         return "Timing: 🟢 EARLY ENTRY — progression saine"
-
     if apy_1d is not None and apy_1d < -5:
         return "Timing: 🟡 COOLDOWN — attendre stabilisation"
 
@@ -367,9 +346,6 @@ def decision(p, previous_state=None):
     if apy_1d is not None and apy_1d < -5:
         return "🟡 COOLDOWN — APY en baisse, attendre stabilisation"
 
-    if apy_1d is not None and -15 <= apy_1d < -5:
-        return "🟠 DÉGRADATION (APY baisse)"
-
     if tvl_1d is not None and -10 <= tvl_1d < -3:
         return "🟠 DÉGRADATION (TVL baisse légère)"
 
@@ -400,7 +376,7 @@ def capital_allocation(p, previous_state=None):
     score = get_score(p)
     d = decision(p, previous_state)
     pair = pair_name(p)
-    _, danger, reduction = il_estimator(p)
+    _, _, reduction = il_estimator(p)
 
     if "SORTIE" in d or "ÉVITER" in d or "COOLDOWN" in d or "TROP TARD" in d or "SOMMET" in d:
         return "💰 Allocation: 0€ — pas d'entrée"
@@ -431,13 +407,10 @@ def priority_score(p, previous_state=None):
 
     if "SORTIE URGENTE" in d:
         return 20_000
-
     if "SORTIE" in d:
         return 10_000
-
     if "ENTRY AFTER DROP" in d:
         return 900
-
     if "ÉVITER" in d or "TROP TARD" in d or "SOMMET" in d:
         return -10_000
 
@@ -445,55 +418,38 @@ def priority_score(p, previous_state=None):
 
     if sweet_spot(p):
         score += 500
-
     if sniper(p):
         score += 400
-
     if "ENTRÉE POSSIBLE" in d:
         score += 300
-
     if momentum(p) == "📈 Momentum positif":
         score += 100
-
-    if "DÉGRADATION" in d or "COOLDOWN" in d:
+    if "COOLDOWN" in d:
         score += 50
 
     return score
 
-def filter_pools(pools):
-    results = []
+def basic_filter(p):
+    if p.get("chain") not in CHAINS:
+        return False
+    if p.get("project") not in SOLID_PROTOCOLS:
+        return False
+    if (p.get("tvlUsd") or 0) < MIN_TVL:
+        return False
 
-    for p in pools:
-        if p.get("chain") not in CHAINS:
-            continue
+    apy_current = p.get("apy") or 0
+    apy_30d = p.get("apyMean30d") or apy_current
 
-        if p.get("project") not in SOLID_PROTOCOLS:
-            continue
+    if apy_current < MIN_APY:
+        return False
+    if apy_30d < MIN_APY or apy_30d > MAX_APY:
+        return False
+    if is_pair_too_dangerous(p):
+        return False
+    if risk_label(p) == "🔴 RISQUÉ":
+        return False
 
-        if (p.get("tvlUsd") or 0) < MIN_TVL:
-            continue
-
-        apy_current = p.get("apy") or 0
-        apy_30d = p.get("apyMean30d") or apy_current
-
-        if apy_current < MIN_APY:
-            continue
-
-        if apy_30d < MIN_APY or apy_30d > MAX_APY:
-            continue
-
-        if is_pair_too_dangerous(p):
-            continue
-
-        if risk_label(p) == "🔴 RISQUÉ":
-            continue
-
-        if decision(p) == "🎯 NEUTRE":
-            continue
-
-        results.append(p)
-
-    return sorted(results, key=lambda x: priority_score(x), reverse=True)[:5]
+    return True
 
 def get_old_signal(pool_id):
     conn = connect_db()
@@ -521,13 +477,10 @@ def is_new_signal(pool_id, apy, tvl, current_decision, current_state):
 
     if abs(apy - last_apy) >= 3:
         return True
-
     if abs(tvl - last_tvl) >= 3_000_000:
         return True
-
     if current_decision != last_decision:
         return True
-
     if current_state != last_state:
         return True
 
@@ -547,7 +500,7 @@ def save_signal(pool_id, apy, tvl, current_decision, current_state):
             last_decision = EXCLUDED.last_decision,
             last_state = EXCLUDED.last_state,
             updated_at = EXCLUDED.updated_at
-    """, (pool_id, apy, tvl, current_decision, current_state, datetime.utcnow()))
+    """, (pool_id, apy, tvl, current_decision, current_state, now_utc()))
 
     conn.commit()
     cur.close()
@@ -581,7 +534,7 @@ def format_pool(p, previous_state=None):
     if sweet_spot(p) or sniper(p):
         msg += "🔥 PRIORITÉ ENTRÉE — SIGNAL FORT 🔥\n"
 
-    if "DÉGRADATION" in d or "COOLDOWN" in d:
+    if "COOLDOWN" in d:
         msg += "🟠 WARNING — POSITION À SURVEILLER 🟠\n"
 
     if "TROP TARD" in d or "SOMMET" in d:
@@ -596,7 +549,6 @@ def format_pool(p, previous_state=None):
 
     if apy_1d is not None:
         msg += f"APY 24h: {round(apy_1d, 2)}%\n"
-
     if tvl_1d is not None:
         msg += f"TVL 24h: {round(tvl_1d, 2)}%\n"
 
@@ -639,7 +591,6 @@ def send(msg):
 
     for i in range(0, len(msg), 3500):
         chunk = msg[i:i + 3500]
-
         requests.post(
             url,
             json={
@@ -657,20 +608,37 @@ def run():
     response.raise_for_status()
 
     pools = response.json()["data"]
-    best = filter_pools(pools)
 
-    msg = "🚨 ALERTES DEFI — POSTGRES PRO\n\n"
-    alerts_sent = 0
+    candidates = []
 
-    for p in best:
+    for p in pools:
+        if not basic_filter(p):
+            continue
+
         pool_id = p.get("pool")
-
         if not pool_id:
             continue
 
         old = get_old_signal(pool_id)
         previous_state = old[3] if old else None
+        d = decision(p, previous_state)
 
+        if d == "🎯 NEUTRE":
+            continue
+
+        candidates.append((p, previous_state))
+
+    best = sorted(
+        candidates,
+        key=lambda item: priority_score(item[0], item[1]),
+        reverse=True
+    )[:5]
+
+    msg = "🚨 ALERTES DEFI — POSTGRES PRO\n\n"
+    alerts_sent = 0
+
+    for p, previous_state in best:
+        pool_id = p.get("pool")
         apy = p.get("apy") or 0
         tvl = p.get("tvlUsd") or 0
         current_state = market_state(p)
