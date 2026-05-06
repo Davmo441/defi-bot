@@ -374,30 +374,52 @@ def decision(p, previous_state=None):
 
 def capital_allocation(p, previous_state=None):
     score = get_score(p)
+    label = risk_label(p)
     d = decision(p, previous_state)
-    pair = pair_name(p)
     _, _, reduction = il_estimator(p)
 
-    if "SORTIE" in d or "ÉVITER" in d or "COOLDOWN" in d or "TROP TARD" in d or "SOMMET" in d:
+    is_sweet = bool(sweet_spot(p))
+    is_sommet = "SOMMET" in d or "TROP TARD" in d
+
+    if label == "🔴 RISQUÉ":
+        return "💰 Allocation: 0€ — risque trop élevé"
+
+    if "SORTIE" in d or "ÉVITER" in d or "COOLDOWN" in d:
         return "💰 Allocation: 0€ — pas d'entrée"
 
-    if pair == "Altcoin / Stable":
+    if label == "🟢 SAFE" and is_sweet:
+        base_pct = 0.15
+
+    elif label == "🟢 SAFE" and is_sommet:
         base_pct = 0.03
+
+    elif label == "🟠 MOYEN" and is_sweet:
+        base_pct = 0.08
+
+    elif label == "🟠 MOYEN" and is_sommet:
+        base_pct = 0.015
+
     elif "ENTRY AFTER DROP" in d:
         base_pct = 0.10
+
     elif sniper(p):
         base_pct = 0.08
-    elif sweet_spot(p):
-        base_pct = 0.15 if score >= 5 else 0.08
+
     elif "ENTRÉE POSSIBLE" in d:
-        base_pct = 0.12 if score >= 5 else 0.06
+        if score >= 5:
+            base_pct = 0.12
+        elif score >= 3:
+            base_pct = 0.06
+        else:
+            base_pct = 0.00
+
     else:
         base_pct = 0.00
 
     adjusted_pct = base_pct * (1 - reduction)
     amount = CAPITAL_TOTAL * adjusted_pct
 
-    if adjusted_pct == 0:
+    if adjusted_pct <= 0:
         return "💰 Allocation: 0€ — signal insuffisant"
 
     return f"💰 Allocation ajustée IL: ~{round(amount, 2)}€ max ({round(adjusted_pct * 100, 1)}% du capital)"
@@ -411,7 +433,7 @@ def priority_score(p, previous_state=None):
         return 10_000
     if "ENTRY AFTER DROP" in d:
         return 900
-    if "ÉVITER" in d or "TROP TARD" in d or "SOMMET" in d:
+    if "ÉVITER" in d:
         return -10_000
 
     score = get_score(p)
@@ -422,6 +444,8 @@ def priority_score(p, previous_state=None):
         score += 400
     if "ENTRÉE POSSIBLE" in d:
         score += 300
+    if "SOMMET" in d or "TROP TARD" in d:
+        score += 150
     if momentum(p) == "📈 Momentum positif":
         score += 100
     if "COOLDOWN" in d:
@@ -445,8 +469,6 @@ def basic_filter(p):
     if apy_30d < MIN_APY or apy_30d > MAX_APY:
         return False
     if is_pair_too_dangerous(p):
-        return False
-    if risk_label(p) == "🔴 RISQUÉ":
         return False
 
     return True
@@ -538,7 +560,7 @@ def format_pool(p, previous_state=None):
         msg += "🟠 WARNING — POSITION À SURVEILLER 🟠\n"
 
     if "TROP TARD" in d or "SOMMET" in d:
-        msg += "🟠 LATE ENTRY — NE PAS COURIR APRÈS LE PUMP 🟠\n"
+        msg += "🟠 ENTRÉE SPÉCULATIVE — PETITE TAILLE UNIQUEMENT 🟠\n"
 
     msg += f"{risk_label(p)}\n"
     msg += f"{symbol} | {project}\n"
