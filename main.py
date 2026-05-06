@@ -602,13 +602,14 @@ def send(msg):
         )
 
 def run():
+    print("✅ RUN START")
+
     init_db()
 
     response = requests.get("https://yields.llama.fi/pools", timeout=30)
     response.raise_for_status()
 
     pools = response.json()["data"]
-
     candidates = []
 
     for p in pools:
@@ -651,8 +652,10 @@ def run():
 
     if alerts_sent > 0:
         send(msg)
-        print(f"{alerts_sent} alerte(s) envoyée(s).")
+        print(f"✅ {alerts_sent} alertes envoyées")
     else:
-        print("Aucune nouvelle alerte.")
+        print("✅ Aucune nouvelle alerte")
+
+    print("✅ RUN END")
 
 run()
