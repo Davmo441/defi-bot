@@ -34,6 +34,7 @@ def connect_db():
 def init_db():
     conn = connect_db()
     cur = conn.cursor()
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS alerts (
             pool_id TEXT PRIMARY KEY,
@@ -43,6 +44,12 @@ def init_db():
             updated_at TIMESTAMP
         )
     """)
+
+    cur.execute("""
+        ALTER TABLE alerts
+        ADD COLUMN IF NOT EXISTS last_state TEXT
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
@@ -54,16 +61,19 @@ def get_tokens(p):
 
 def token_category(token):
     token = token.upper()
+
     if token in STABLES:
         return "stable"
     if token in ETH_ASSETS:
         return "eth"
     if token in BTC_ASSETS:
         return "btc"
+
     return "alt"
 
 def pair_name(p):
     tokens = get_tokens(p)
+
     if len(tokens) < 2:
         return "Inconnu"
 
@@ -156,6 +166,7 @@ def recommended_range(p):
 
     if apy > 80:
         base += " (élargir: volatilité élevée)"
+
     if il == "yes":
         base += " ⚠️ IL élevé → range large conseillé"
 
@@ -185,6 +196,7 @@ def get_score(p):
 
     if il == "yes":
         score -= 2
+
     if project in SOLID_PROTOCOLS:
         score += 2
 
@@ -208,10 +220,12 @@ def get_score(p):
 
 def risk_label(p):
     s = get_score(p)
+
     if s >= 5:
         return "🟢 SAFE"
     elif s >= 3:
         return "🟠 MOYEN"
+
     return "🔴 RISQUÉ"
 
 def fake_yield(p):
@@ -220,8 +234,10 @@ def fake_yield(p):
 
     if apy > 100:
         return "⚠️ APY très élevé (possible inflation)"
+
     if apy_1d is not None and abs(apy_1d) > 80:
         return "⚠️ APY très instable"
+
     if apy_1d is not None and apy_1d > 25:
         return "⚠️ APY instable (hausse rapide)"
 
@@ -234,6 +250,7 @@ def momentum(p):
     if tvl_1d is not None and apy_1d is not None:
         if tvl_1d > 10 and apy_1d > 0:
             return "📈 Momentum positif"
+
         if tvl_1d < -10:
             return "📉 Momentum négatif"
 
@@ -259,13 +276,78 @@ def sweet_spot(p):
 
     return ""
 
-def decision(p):
+def market_state(p):
+    apy_1d = p.get("apyPct1D")
+
+    if apy_1d is not None and apy_1d < -5:
+        return "COOLDOWN"
+
+    return "NORMAL"
+
+def volume_ratio(p):
+    tvl = p.get("tvlUsd") or 0
+
+    volume = (
+        p.get("volumeUsd1d")
+        or p.get("volumeUsd24h")
+        or p.get("volumeUsd")
+        or 0
+    )
+
+    if tvl <= 0:
+        return 0
+
+    return volume / tvl
+
+def entry_after_drop_signal(p, previous_state):
+    apy = p.get("apy") or 0
+    apy_30d = p.get("apyMean30d") or apy
+    apy_1d = p.get("apyPct1D")
+    tvl_1d = p.get("tvlUsdPct1D")
+    vr = volume_ratio(p)
+
+    if previous_state == "COOLDOWN":
+        if (
+            apy_1d is not None
+            and tvl_1d is not None
+            and apy_1d >= -2
+            and apy >= apy_30d
+            and -5 <= tvl_1d <= 5
+            and vr >= 0.1
+        ):
+            return True
+
+    return False
+
+def timing_label(p):
+    apy = p.get("apy") or 0
+    apy_30d = p.get("apyMean30d") or apy
+    apy_1d = p.get("apyPct1D")
+
+    if apy > apy_30d * 1.4:
+        return "Timing: 🟠 LATE ENTRY — APY déjà trop au-dessus du 30j"
+
+    if apy_1d is not None and apy_1d > 10:
+        return "Timing: 🟠 POSSIBLE SOMMET COURT TERME"
+
+    if apy_1d is not None and 0 <= apy_1d <= 8 and apy <= apy_30d * 1.2:
+        return "Timing: 🟢 EARLY ENTRY — progression saine"
+
+    if apy_1d is not None and apy_1d < -5:
+        return "Timing: 🟡 COOLDOWN — attendre stabilisation"
+
+    return "Timing: ⚪ Neutre"
+
+def decision(p, previous_state=None):
     apy = p.get("apy") or 0
     apy_30d = p.get("apyMean30d") or apy
     apy_1d = p.get("apyPct1D")
     tvl_1d = p.get("tvlUsdPct1D")
     score = get_score(p)
     _, danger, _ = il_estimator(p)
+
+    if entry_after_drop_signal(p, previous_state):
+        return "🟢 ENTRY AFTER DROP — reprise propre"
 
     if danger == "tres_eleve":
         return "🔴 ÉVITER (IL trop élevé)"
@@ -282,6 +364,9 @@ def decision(p):
     if apy < apy_30d * 0.70:
         return "🔴 SORTIE À ENVISAGER"
 
+    if apy_1d is not None and apy_1d < -5:
+        return "🟡 COOLDOWN — APY en baisse, attendre stabilisation"
+
     if apy_1d is not None and -15 <= apy_1d < -5:
         return "🟠 DÉGRADATION (APY baisse)"
 
@@ -291,13 +376,19 @@ def decision(p):
     if apy_1d is not None and apy_1d > 25:
         return "🟠 ATTENDRE (surchauffe)"
 
+    if apy > apy_30d * 1.4:
+        return "🟠 TROP TARD (pump déjà en cours)"
+
+    if apy_1d is not None and apy_1d > 10:
+        return "🟠 POSSIBLE SOMMET COURT TERME"
+
     if sweet_spot(p):
         return "🟢 ENTRÉE POSSIBLE — SWEET SPOT"
 
     if sniper(p) and score >= 3:
         return "🟢 ENTRÉE POSSIBLE — SNIPER"
 
-    if apy >= apy_30d and apy_1d is not None and 0 <= apy_1d < 15 and score >= 3:
+    if apy >= apy_30d and apy_1d is not None and 0 <= apy_1d < 10 and score >= 3:
         return "🟢 ENTRÉE POSSIBLE"
 
     if apy >= apy_30d * 0.90 and score >= 3:
@@ -305,17 +396,19 @@ def decision(p):
 
     return "🎯 NEUTRE"
 
-def capital_allocation(p):
+def capital_allocation(p, previous_state=None):
     score = get_score(p)
-    d = decision(p)
+    d = decision(p, previous_state)
     pair = pair_name(p)
     _, danger, reduction = il_estimator(p)
 
-    if "SORTIE" in d or "ÉVITER" in d:
-        return "💰 Allocation: 0€ — sortie / pas d'entrée"
+    if "SORTIE" in d or "ÉVITER" in d or "COOLDOWN" in d or "TROP TARD" in d or "SOMMET" in d:
+        return "💰 Allocation: 0€ — pas d'entrée"
 
     if pair == "Altcoin / Stable":
         base_pct = 0.03
+    elif "ENTRY AFTER DROP" in d:
+        base_pct = 0.10
     elif sniper(p):
         base_pct = 0.08
     elif sweet_spot(p):
@@ -331,29 +424,38 @@ def capital_allocation(p):
     if adjusted_pct == 0:
         return "💰 Allocation: 0€ — signal insuffisant"
 
-    return f"💰 Allocation ajustée IL: ~{round(amount, 2)}€ max ({round(adjusted_pct*100, 1)}% du capital)"
+    return f"💰 Allocation ajustée IL: ~{round(amount, 2)}€ max ({round(adjusted_pct * 100, 1)}% du capital)"
 
-def priority_score(p):
-    d = decision(p)
+def priority_score(p, previous_state=None):
+    d = decision(p, previous_state)
 
     if "SORTIE URGENTE" in d:
         return 20_000
+
     if "SORTIE" in d:
         return 10_000
-    if "ÉVITER" in d:
+
+    if "ENTRY AFTER DROP" in d:
+        return 900
+
+    if "ÉVITER" in d or "TROP TARD" in d or "SOMMET" in d:
         return -10_000
 
     score = get_score(p)
 
     if sweet_spot(p):
         score += 500
+
     if sniper(p):
         score += 400
+
     if "ENTRÉE POSSIBLE" in d:
         score += 300
+
     if momentum(p) == "📈 Momentum positif":
         score += 100
-    if "DÉGRADATION" in d:
+
+    if "DÉGRADATION" in d or "COOLDOWN" in d:
         score += 50
 
     return score
@@ -364,8 +466,10 @@ def filter_pools(pools):
     for p in pools:
         if p.get("chain") not in CHAINS:
             continue
+
         if p.get("project") not in SOLID_PROTOCOLS:
             continue
+
         if (p.get("tvlUsd") or 0) < MIN_TVL:
             continue
 
@@ -374,66 +478,82 @@ def filter_pools(pools):
 
         if apy_current < MIN_APY:
             continue
+
         if apy_30d < MIN_APY or apy_30d > MAX_APY:
             continue
+
         if is_pair_too_dangerous(p):
             continue
+
         if risk_label(p) == "🔴 RISQUÉ":
             continue
+
         if decision(p) == "🎯 NEUTRE":
             continue
 
         results.append(p)
 
-    return sorted(results, key=priority_score, reverse=True)[:5]
+    return sorted(results, key=lambda x: priority_score(x), reverse=True)[:5]
 
 def get_old_signal(pool_id):
     conn = connect_db()
     cur = conn.cursor()
+
     cur.execute(
-        "SELECT last_apy, last_tvl, last_decision FROM alerts WHERE pool_id = %s",
+        "SELECT last_apy, last_tvl, last_decision, last_state FROM alerts WHERE pool_id = %s",
         (pool_id,)
     )
+
     row = cur.fetchone()
+
     cur.close()
     conn.close()
+
     return row
 
-def is_new_signal(pool_id, apy, tvl, current_decision):
+def is_new_signal(pool_id, apy, tvl, current_decision, current_state):
     old = get_old_signal(pool_id)
 
     if old is None:
         return True
 
-    last_apy, last_tvl, last_decision = old
+    last_apy, last_tvl, last_decision, last_state = old
 
     if abs(apy - last_apy) >= 3:
         return True
+
     if abs(tvl - last_tvl) >= 3_000_000:
         return True
+
     if current_decision != last_decision:
+        return True
+
+    if current_state != last_state:
         return True
 
     return False
 
-def save_signal(pool_id, apy, tvl, current_decision):
+def save_signal(pool_id, apy, tvl, current_decision, current_state):
     conn = connect_db()
     cur = conn.cursor()
+
     cur.execute("""
-        INSERT INTO alerts (pool_id, last_apy, last_tvl, last_decision, updated_at)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO alerts (pool_id, last_apy, last_tvl, last_decision, last_state, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (pool_id)
         DO UPDATE SET
             last_apy = EXCLUDED.last_apy,
             last_tvl = EXCLUDED.last_tvl,
             last_decision = EXCLUDED.last_decision,
+            last_state = EXCLUDED.last_state,
             updated_at = EXCLUDED.updated_at
-    """, (pool_id, apy, tvl, current_decision, datetime.utcnow()))
+    """, (pool_id, apy, tvl, current_decision, current_state, datetime.utcnow()))
+
     conn.commit()
     cur.close()
     conn.close()
 
-def format_pool(p):
+def format_pool(p, previous_state=None):
     pool_id = p.get("pool")
     symbol = p.get("symbol")
     project = p.get("project")
@@ -444,7 +564,9 @@ def format_pool(p):
     tvl = p.get("tvlUsd") or 0
     apy_1d = p.get("apyPct1D")
     tvl_1d = p.get("tvlUsdPct1D")
-    d = decision(p)
+    d = decision(p, previous_state)
+    state = market_state(p)
+    vr = volume_ratio(p)
 
     msg = ""
 
@@ -453,11 +575,17 @@ def format_pool(p):
     elif "SORTIE" in d:
         msg += "🚨🚨 EXIT — ALERTE SORTIE 🚨🚨\n"
 
+    if "ENTRY AFTER DROP" in d:
+        msg += "🟢 ENTRY AFTER DROP — REPRISE APRÈS BAISSE 🟢\n"
+
     if sweet_spot(p) or sniper(p):
         msg += "🔥 PRIORITÉ ENTRÉE — SIGNAL FORT 🔥\n"
 
-    if "DÉGRADATION" in d:
+    if "DÉGRADATION" in d or "COOLDOWN" in d:
         msg += "🟠 WARNING — POSITION À SURVEILLER 🟠\n"
+
+    if "TROP TARD" in d or "SOMMET" in d:
+        msg += "🟠 LATE ENTRY — NE PAS COURIR APRÈS LE PUMP 🟠\n"
 
     msg += f"{risk_label(p)}\n"
     msg += f"{symbol} | {project}\n"
@@ -468,9 +596,13 @@ def format_pool(p):
 
     if apy_1d is not None:
         msg += f"APY 24h: {round(apy_1d, 2)}%\n"
+
     if tvl_1d is not None:
         msg += f"TVL 24h: {round(tvl_1d, 2)}%\n"
 
+    msg += f"Volume/TVL: {round(vr * 100, 2)}%\n"
+    msg += f"State: {state}\n"
+    msg += timing_label(p) + "\n"
     msg += pair_type(p) + "\n"
     msg += real_il_risk(p) + "\n"
     msg += f"🔗 https://defillama.com/yields/pool/{pool_id}\n"
@@ -493,7 +625,7 @@ def format_pool(p):
 
     msg += fake_yield(p) + "\n"
     msg += d + "\n"
-    msg += capital_allocation(p) + "\n"
+    msg += capital_allocation(p, previous_state) + "\n"
     msg += recommended_range(p) + "\n"
     msg += "────────────\n\n"
 
@@ -507,6 +639,7 @@ def send(msg):
 
     for i in range(0, len(msg), 3500):
         chunk = msg[i:i + 3500]
+
         requests.post(
             url,
             json={
@@ -531,16 +664,21 @@ def run():
 
     for p in best:
         pool_id = p.get("pool")
+
         if not pool_id:
             continue
 
+        old = get_old_signal(pool_id)
+        previous_state = old[3] if old else None
+
         apy = p.get("apy") or 0
         tvl = p.get("tvlUsd") or 0
-        current_decision = decision(p)
+        current_state = market_state(p)
+        current_decision = decision(p, previous_state)
 
-        if is_new_signal(pool_id, apy, tvl, current_decision):
-            msg += format_pool(p)
-            save_signal(pool_id, apy, tvl, current_decision)
+        if is_new_signal(pool_id, apy, tvl, current_decision, current_state):
+            msg += format_pool(p, previous_state)
+            save_signal(pool_id, apy, tvl, current_decision, current_state)
             alerts_sent += 1
 
     if alerts_sent > 0:
