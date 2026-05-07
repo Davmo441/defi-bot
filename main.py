@@ -389,22 +389,16 @@ def capital_allocation(p, previous_state=None):
 
     if label == "🟢 SAFE" and is_sweet:
         base_pct = 0.15
-
     elif label == "🟢 SAFE" and is_sommet:
         base_pct = 0.03
-
     elif label == "🟠 MOYEN" and is_sweet:
         base_pct = 0.08
-
     elif label == "🟠 MOYEN" and is_sommet:
         base_pct = 0.015
-
     elif "ENTRY AFTER DROP" in d:
         base_pct = 0.10
-
     elif sniper(p):
         base_pct = 0.08
-
     elif "ENTRÉE POSSIBLE" in d:
         if score >= 5:
             base_pct = 0.12
@@ -412,7 +406,6 @@ def capital_allocation(p, previous_state=None):
             base_pct = 0.06
         else:
             base_pct = 0.00
-
     else:
         base_pct = 0.00
 
@@ -560,7 +553,10 @@ def format_pool(p, previous_state=None):
         msg += "🟠 WARNING — POSITION À SURVEILLER 🟠\n"
 
     if "TROP TARD" in d or "SOMMET" in d:
-        msg += "🟠 ENTRÉE SPÉCULATIVE — PETITE TAILLE UNIQUEMENT 🟠\n"
+        if risk_label(p) == "🔴 RISQUÉ":
+            msg += "🟠 SIGNAL SPÉCULATIF DÉTECTÉ — MAIS BLOQUÉ PAR RISQUE 🟠\n"
+        else:
+            msg += "🟠 ENTRÉE SPÉCULATIVE — PETITE TAILLE UNIQUEMENT 🟠\n"
 
     msg += f"{risk_label(p)}\n"
     msg += f"{symbol} | {project}\n"
