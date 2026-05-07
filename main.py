@@ -547,7 +547,10 @@ def format_pool(p, previous_state=None):
         msg += "🟢 ENTRY AFTER DROP — REPRISE APRÈS BAISSE 🟢\n"
 
     if sweet_spot(p) or sniper(p):
-        msg += "🔥 PRIORITÉ ENTRÉE — SIGNAL FORT 🔥\n"
+        if risk_label(p) == "🔴 RISQUÉ":
+            msg += "⚠️ SIGNAL D’ENTRÉE DÉTECTÉ — MAIS BLOQUÉ PAR RISQUE ⚠️\n"
+        else:
+            msg += "🔥 PRIORITÉ ENTRÉE — SIGNAL FORT 🔥\n"
 
     if "COOLDOWN" in d:
         msg += "🟠 WARNING — POSITION À SURVEILLER 🟠\n"
@@ -583,7 +586,10 @@ def format_pool(p, previous_state=None):
 
     s = sweet_spot(p)
     if s:
-        msg += s + "\n"
+        if risk_label(p) == "🔴 RISQUÉ":
+            msg += "🟢 SWEET SPOT DÉTECTÉ — NON VALIDÉ CAR RISQUE ÉLEVÉ\n"
+        else:
+            msg += s + "\n"
 
     m = momentum(p)
     if m:
