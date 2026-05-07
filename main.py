@@ -547,18 +547,11 @@ def format_pool(p, previous_state=None):
         msg += "🟢 ENTRY AFTER DROP — REPRISE APRÈS BAISSE 🟢\n"
 
     if sweet_spot(p) or sniper(p):
-        if risk_label(p) == "🔴 RISQUÉ":
-            msg += "⚠️ SIGNAL D’ENTRÉE DÉTECTÉ — MAIS BLOQUÉ PAR RISQUE ⚠️\n"
-        else:
+        if risk_label(p) != "🔴 RISQUÉ":
             msg += "🔥 PRIORITÉ ENTRÉE — SIGNAL FORT 🔥\n"
 
-    if "COOLDOWN" in d:
-        msg += "🟠 WARNING — POSITION À SURVEILLER 🟠\n"
-
     if "TROP TARD" in d or "SOMMET" in d:
-        if risk_label(p) == "🔴 RISQUÉ":
-            msg += "🟠 SIGNAL SPÉCULATIF DÉTECTÉ — MAIS BLOQUÉ PAR RISQUE 🟠\n"
-        else:
+        if risk_label(p) != "🔴 RISQUÉ":
             msg += "🟠 ENTRÉE SPÉCULATIVE — PETITE TAILLE UNIQUEMENT 🟠\n"
 
     msg += f"{risk_label(p)}\n"
@@ -585,11 +578,8 @@ def format_pool(p, previous_state=None):
         msg += f"📊 Chart: https://dexscreener.com/search?q={token}\n"
 
     s = sweet_spot(p)
-    if s:
-        if risk_label(p) == "🔴 RISQUÉ":
-            msg += "🟢 SWEET SPOT DÉTECTÉ — NON VALIDÉ CAR RISQUE ÉLEVÉ\n"
-        else:
-            msg += s + "\n"
+    if s and risk_label(p) != "🔴 RISQUÉ":
+        msg += s + "\n"
 
     m = momentum(p)
     if m:
@@ -659,7 +649,7 @@ def run():
         reverse=True
     )[:5]
 
-    msg = "🚨 ALERTES DEFI — POSTGRES PRO\n\n"
+    msg = "🚨 ALERTES DEFI\n\n"
     alerts_sent = 0
 
     for p, previous_state in best:
